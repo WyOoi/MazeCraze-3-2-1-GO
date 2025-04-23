@@ -11,8 +11,8 @@
 Adafruit_APDS9960 apds[5];
 
 // --- HC-SR04 ultrasonic definitions ---
-const int trigPins[3] = {12, 14, 27};
-const int echoPins[3] = {13, 25, 26};
+const int trigPins[3] = {14, 34, 18};
+const int echoPins[3] = {27, 35, 19};
 const int adjacency[3][2] = {{1, -1}, {0, 2}, {1, -1}};
 
 // --- L298N Motor driver pins ---
@@ -221,15 +221,17 @@ void setup() {
 }
 
 void loop() {
-  scanFloorColor();
-  scanTreasureColor();
-  scanWallDFS();
+  for (i=0;i<3;i++);
+  read distance (i);
+  // scanFloorColor();
+  // scanTreasureColor();
+  // scanWallDFS();
   
-  // Example drive: move forward until encoder A reaches 100 ticks
-  if (countA < 100) {
-    forward(150, 150);
-  } else {
-    stopMotors();
-  }
-  delay(1000);
+  // // Example drive: move forward until encoder A reaches 100 ticks
+  // if (countA < 100) {
+  //   forward(150, 150);
+  // } else {
+  //   stopMotors();
+  // }
+  // delay(1000); 
 }

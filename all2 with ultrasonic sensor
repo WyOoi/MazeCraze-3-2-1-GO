@@ -1,0 +1,140 @@
+// ESP32 Sketch with Color Scanning and Ultrasonic DFS Scan
+// - 5 APDS9960 color sensors (TCA9548A multiplexer)
+// - 3 HC-SR04 ultrasonic sensors (wall detection using DFS)
+
+#include <Wire.h>
+#include <Adafruit_APDS9960.h>
+
+// TCA9548A I2C multiplexer address
+#define TCA_ADDR 0x70
+Adafruit_APDS9960 apds[5];
+
+// HC-SR04 pin definitions
+const int trigPins[3] = {12, 14, 27};  // Ultrasonic trigger pins
+const int echoPins[3] = {13, 25, 26};  // Ultrasonic echo pins
+
+// Graph adjacency for DFS (linear chain: 0 <-> 1 <-> 2)
+const int adjacency[3][2] = {{1, -1}, {0, 2}, {1, -1}};
+
+// Color threshold definitions
+const uint16_t TH_BLACK_F = 100;
+const uint16_t TH_RED_F   = 200;
+const uint16_t TH_GREEN_F = 200;
+const uint16_t TH_BLUE_F  = 200;
+const uint16_t TH_CYAN_T   = 200;
+const uint16_t TH_TGREEN_T = 200;
+const uint16_t TH_BLACK_T  = 100;
+
+// --- TCA9548A multiplexer channel select ---
+void tcaSelect(uint8_t channel) {
+  if (channel > 7) return;
+  Wire.beginTransmission(TCA_ADDR);
+  Wire.write(1 << channel);
+  Wire.endTransmission();
+}
+
+// Map raw RGB to floor color
+String getFloorColor(uint16_t r, uint16_t g, uint16_t b) {
+  if (r < TH_BLACK_F && g < TH_BLACK_F && b < TH_BLACK_F) return "Black";
+  if (r > TH_RED_F   && g < TH_BLACK_F && b < TH_BLACK_F) return "Red";
+  if (r < TH_BLACK_F && g > TH_GREEN_F && b < TH_BLACK_F) return "Green";
+  if (r > TH_RED_F   && g > TH_GREEN_F && b < TH_BLACK_F) return "Yellow";
+  if (r < TH_BLACK_F && g < TH_BLACK_F && b > TH_BLUE_F ) return "Blue";
+  return "Unknown";
+}
+
+// Map raw RGB to treasure color
+String getTreasureColor(uint16_t r, uint16_t g, uint16_t b) {
+  if (g > TH_CYAN_T   && b > TH_CYAN_T   && r < TH_BLACK_T) return "Cyan";
+  if (g > TH_TGREEN_T && r < TH_BLACK_T && b < TH_BLACK_T) return "Green";
+  if (r < TH_BLACK_T && g < TH_BLACK_T && b < TH_BLACK_T)  return "Black";
+  return "Invalid";
+}
+
+// 1) Scan floor with 2 sensors (channels 0-1)
+void scanFloorColor() {
+  uint16_t r, g, b, c;
+  for (uint8_t ch = 0; ch < 2; ch++) {
+    tcaSelect(ch);
+    if (apds[ch].colorDataReady()) {
+      apds[ch].getColorData(&r, &g, &b, &c);
+      Serial.printf("Floor Sensor #%u: %s\n", ch, getFloorColor(r, g, b).c_str());
+    }
+    delay(100);
+  }
+  Serial.println("--- Floor Scan Complete ---");
+}
+
+// 2) Scan treasures with 3 sensors (channels 2-4)
+void scanTreasureColor() {
+  uint16_t r, g, b, c;
+  for (uint8_t ch = 2; ch < 5; ch++) {
+    tcaSelect(ch);
+    if (apds[ch].colorDataReady()) {
+      apds[ch].getColorData(&r, &g, &b, &c);
+      Serial.printf("Treasure Sensor #%u: %s\n", ch, getTreasureColor(r, g, b).c_str());
+    }
+    delay(100);
+  }
+  Serial.println("--- Treasure Scan Complete ---");
+}
+
+// Read distance from HC-SR04 at given index
+long readDistance(int index) {
+  digitalWrite(trigPins[index], LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPins[index], HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPins[index], LOW);
+  long duration = pulseIn(echoPins[index], HIGH, 30000);
+  // Convert to cm (sound speed ~343 m/s)
+  long distance = duration * 0.034 / 2;
+  return distance;
+}
+
+// Recursive DFS scan of 3 ultrasonic sensors
+void scanUltrasonicDFS(int idx, bool visited[]) {
+  if (idx < 0 || idx >= 3 || visited[idx]) return;
+  visited[idx] = true;
+  long dist = readDistance(idx);
+  Serial.printf("Ultrasonic Sensor #%d: %ld cm\n", idx, dist);
+  // Explore adjacent sensors
+  for (int i = 0; i < 2; i++) {
+    scanUltrasonicDFS(adjacency[idx][i], visited);
+  }
+}
+
+// Wrapper to start DFS-based ultrasonic scan
+void scanWallDFS() {
+  bool visited[3] = {false, false, false};
+  scanUltrasonicDFS(0, visited);  // start from sensor 0
+  Serial.println("--- Ultrasonic DFS Scan Complete ---");
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  // Initialize APDS9960 sensors
+  for (uint8_t i = 0; i < 5; i++) {
+    tcaSelect(i);
+    if (!apds[i].begin()) {
+      Serial.printf("APDS9960 #%u initialization failed\n", i);
+    } else {
+      apds[i].enableColor(true);
+      Serial.printf("APDS9960 #%u ready\n", i);
+    }
+    delay(100);
+  }
+  // Initialize HC-SR04 pins
+  for (int i = 0; i < 3; i++) {
+    pinMode(trigPins[i], OUTPUT);
+    pinMode(echoPins[i], INPUT);
+  }
+}
+
+void loop() {
+  scanFloorColor();     // channels 0-1
+  scanTreasureColor();  // channels 2-4
+  scanWallDFS();        // ultrasonic DFS scan
+  delay(1000);
+}
